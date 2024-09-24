@@ -173,7 +173,12 @@ fn copy(source: &str, destination: &str, cli: &Cli, verbose: Arc<AtomicBool>, nu
 
 fn copy_directory(source: &Path, destination: &Path, cli: &Cli, verbose: Arc<AtomicBool>, num_threads: usize) -> io::Result<()> {
     if !destination.exists() {
-        fs::create_dir_all(destination)?;
+        fs::create_dir_all(destination).map_err(|e| {
+            if cli.debug {
+                eprintln!("Debug info: Failed to create destination directory: {:#?}", e);
+            }
+            e
+        })?;
     }
 
     let (tx, rx) = mpsc::channel::<(PathBuf, PathBuf)>();
@@ -201,7 +206,13 @@ fn copy_directory(source: &Path, destination: &Path, cli: &Cli, verbose: Arc<Ato
     }).collect();
 
     pool.install(|| {
-        let entries: Vec<_> = fs::read_dir(source)?.collect::<Result<_, _>>()?;
+        let entries: Vec<_> = fs::read_dir(source).map_err(|e| {
+            if cli.debug {
+                eprintln!("Debug info: Failed to read source directory: {:#?}", e);
+            }
+            e
+        })?.collect::<Result<_, _>>()?;
+        
         entries.par_iter().try_for_each(|entry| {
             let file_type = entry.file_type()?;
             let new_destination = destination.join(entry.file_name());
@@ -245,31 +256,70 @@ fn copy_file(source: &Path, destination: &Path, cli: &Cli, verbose: Arc<AtomicBo
             println!("{}", format!("Not overwriting existing file {}", destination.display()).yellow());
             return Ok(());
         } else {
-            return Err(io::Error::new(io::ErrorKind::AlreadyExists, "Destination file already exists. Use --force to overwrite."));
+            let err = io::Error::new(io::ErrorKind::AlreadyExists, "Destination file already exists. Use --force to overwrite.");
+            if cli.debug {
+                eprintln!("Debug info: {:#?}", err);
+            }
+            return Err(err);
         }
     }
 
     if cli.update && destination.exists() {
-        let source_metadata = source.metadata()?;
-        let destination_metadata = destination.metadata()?;
+        let source_metadata = source.metadata().map_err(|e| {
+            if cli.debug {
+                eprintln!("Debug info: Failed to get source metadata: {:#?}", e);
+            }
+            e
+        })?;
+        let destination_metadata = destination.metadata().map_err(|e| {
+            if cli.debug {
+                eprintln!("Debug info: Failed to get destination metadata: {:#?}", e);
+            }
+            e
+        })?;
         if source_metadata.modified()? <= destination_metadata.modified()? {
             println!("{}", format!("Not updating file {}", destination.display()).yellow());
             return Ok(());
         }
     }
 
-    let mut source_file = BufReader::with_capacity(BUFFER_SIZE, File::open(source)?);
-    let mut destination_file = BufWriter::with_capacity(BUFFER_SIZE, File::create(destination)?);
+    let mut source_file = BufReader::with_capacity(BUFFER_SIZE, File::open(source).map_err(|e| {
+        if cli.debug {
+            eprintln!("Debug info: Failed to open source file: {:#?}", e);
+        }
+        e
+    })?);
+    let mut destination_file = BufWriter::with_capacity(BUFFER_SIZE, File::create(destination).map_err(|e| {
+        if cli.debug {
+            eprintln!("Debug info: Failed to create destination file: {:#?}", e);
+        }
+        e
+    })?);
 
     let mut buffer = vec![0; BUFFER_SIZE];
     loop {
-        let bytes_read = source_file.read(&mut buffer)?;
+        let bytes_read = source_file.read(&mut buffer).map_err(|e| {
+            if cli.debug {
+                eprintln!("Debug info: Failed to read from source file: {:#?}", e);
+            }
+            e
+        })?;
         if bytes_read == 0 {
             break;
         }
-        destination_file.write_all(&buffer[..bytes_read])?;
+        destination_file.write_all(&buffer[..bytes_read]).map_err(|e| {
+            if cli.debug {
+                eprintln!("Debug info: Failed to write to destination file: {:#?}", e);
+            }
+            e
+        })?;
     }
-    destination_file.flush()?;
+    destination_file.flush().map_err(|e| {
+        if cli.debug {
+            eprintln!("Debug info: Failed to flush destination file: {:#?}", e);
+        }
+        e
+    })?;
 
     if verbose.load(Ordering::Relaxed) {
         println!("{}", format!("Copied: {} -> {}", source.display(), destination.display()).green());
