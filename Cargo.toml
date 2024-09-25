@@ -1,0 +1,12 @@
+[package]
+name = "rc"
+version = "0.0.1-beta"
+edition = "2021"
+license = "GPL-3.0"
+# MAJOR.MINOR.PATCH[-PRERELEASE/BETA/ALPHA][+BUILD]
+[dependencies]
+clap = { version = "4.3", features = ["derive"] }
+colored = "2.0"
+rayon = "1.7"
+sysinfo = "0.29"
+num_cpus = "1.13.0"
