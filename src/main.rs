@@ -163,11 +163,16 @@ fn copy(source: &str, destination: &str, cli: &Cli, verbose: Arc<AtomicBool>, nu
 
     if source_path.is_dir() {
         if !cli.recursive {
-            return Err(io::Error::new(io::ErrorKind::InvalidInput, "Source is a directory. Use -r option to copy recursively."));
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, "La fuente es un directorio. Use la opción -r para copiar recursivamente."));
         }
         copy_directory(source_path, destination_path, cli, verbose, num_threads)
     } else {
-        copy_file(source_path, destination_path, cli, verbose)
+        let dest_path = if destination_path.is_dir() {
+            destination_path.join(source_path.file_name().ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "No se pudo obtener el nombre del archivo fuente"))?)
+        } else {
+            destination_path.to_path_buf()
+        };
+        copy_file(source_path, &dest_path, cli, verbose)
     }
 }
 
@@ -175,7 +180,7 @@ fn copy_directory(source: &Path, destination: &Path, cli: &Cli, verbose: Arc<Ato
     if !destination.exists() {
         fs::create_dir_all(destination).map_err(|e| {
             if cli.debug {
-                eprintln!("Debug info: Failed to create destination directory: {:#?}", e);
+                eprintln!("Debug info: Error al crear el directorio de destino: {:#?}", e);
             }
             e
         })?;
@@ -242,59 +247,64 @@ fn copy_directory(source: &Path, destination: &Path, cli: &Cli, verbose: Arc<Ato
 }
 
 fn copy_file(source: &Path, destination: &Path, cli: &Cli, verbose: Arc<AtomicBool>) -> io::Result<()> {
+    println!("Intentando copiar de {} a {}", source.display(), destination.display());
+
     if destination.exists() && !cli.force {
+        println!("El archivo de destino {} existe.", destination.display());
         if cli.interactive {
-            print!("File {} already exists. Overwrite? (y/n): ", destination.display());
+            print!("El archivo {} ya existe. ¿Sobrescribir? (s/n): ", destination.display());
             io::stdout().flush()?;
             let mut response = String::new();
             io::stdin().read_line(&mut response)?;
-            if response.trim().to_lowercase() != "y" {
-                println!("{}", format!("Skipping file {}", destination.display()).yellow());
+            if response.trim().to_lowercase() != "s" {
+                println!("{}", format!("Omitiendo archivo {}", destination.display()).yellow());
                 return Ok(());
             }
         } else if cli.no_clobber {
-            println!("{}", format!("Not overwriting existing file {}", destination.display()).yellow());
+            println!("{}", format!("No se sobrescribe el archivo existente {}", destination.display()).yellow());
             return Ok(());
         } else {
-            let err = io::Error::new(io::ErrorKind::AlreadyExists, "Destination file already exists. Use --force to overwrite.");
+            let err = io::Error::new(io::ErrorKind::AlreadyExists, "El archivo de destino ya existe. Use --force para sobrescribir.");
             if cli.debug {
                 eprintln!("Debug info: {:#?}", err);
             }
             return Err(err);
         }
+    } else {
+        println!("El archivo de destino {} no existe o se está forzando la sobrescritura.", destination.display());
     }
 
     if cli.update && destination.exists() {
         let source_metadata = source.metadata().map_err(|e| {
             if cli.debug {
-                eprintln!("Debug info: Failed to get source metadata: {:#?}", e);
+                eprintln!("Debug info: Error al obtener los metadatos del archivo fuente: {:#?}", e);
             }
             e
         })?;
         let destination_metadata = destination.metadata().map_err(|e| {
             if cli.debug {
-                eprintln!("Debug info: Failed to get destination metadata: {:#?}", e);
+                eprintln!("Debug info: Error al obtener los metadatos del archivo de destino: {:#?}", e);
             }
             e
         })?;
         if source_metadata.modified()? <= destination_metadata.modified()? {
-            println!("{}", format!("Not updating file {}", destination.display()).yellow());
+            println!("{}", format!("No se actualiza el archivo {}", destination.display()).yellow());
             return Ok(());
         }
     }
 
     let mut source_file = BufReader::with_capacity(BUFFER_SIZE, File::open(source).map_err(|e| {
         if cli.debug {
-            eprintln!("Debug info: Failed to open source file: {:#?}", e);
+            eprintln!("Debug info: Error al abrir el archivo fuente: {:#?}", e);
         }
         e
     })?);
     let mut destination_file = BufWriter::with_capacity(BUFFER_SIZE, File::create(destination).map_err(|e| {
         if cli.debug {
-            eprintln!("Debug info: Failed to create destination file: {:#?}", e);
-            eprintln!("Destination path: {}", destination.display());
-            eprintln!("Current user: {:?}", std::env::var("USERNAME"));
-            eprintln!("Current directory: {:?}", std::env::current_dir().unwrap());
+            eprintln!("Debug info: Error al crear el archivo de destino: {:#?}", e);
+            eprintln!("Ruta de destino: {}", destination.display());
+            eprintln!("Usuario actual: {:?}", std::env::var("USERNAME"));
+            eprintln!("Directorio actual: {:?}", std::env::current_dir().unwrap());
         }
         e
     })?);
