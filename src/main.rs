@@ -292,6 +292,9 @@ fn copy_file(source: &Path, destination: &Path, cli: &Cli, verbose: Arc<AtomicBo
     let mut destination_file = BufWriter::with_capacity(BUFFER_SIZE, File::create(destination).map_err(|e| {
         if cli.debug {
             eprintln!("Debug info: Failed to create destination file: {:#?}", e);
+            eprintln!("Destination path: {}", destination.display());
+            eprintln!("Current user: {:?}", std::env::var("USERNAME"));
+            eprintln!("Current directory: {:?}", std::env::current_dir().unwrap());
         }
         e
     })?);
